@@ -1,40 +1,42 @@
-import React, { useState, useEffect } from 'react';
-import { TabsContent } from "@/components/ui/tabs";
-import { format, subMonths, addMonths, startOfMonth, endOfMonth, eachDayOfInterval, isWeekend } from 'date-fns';
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { toast } from "sonner";
-import { Loader2 } from 'lucide-react';
-import { fetchEmployees } from '@/services/api';
-import { getAttendanceByDate } from '@/services/attendance';
+import React, { useState, useEffect, useCallback } from 'react';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isWeekend, addMonths, subMonths } from 'date-fns';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Calendar } from '@/components/ui/calendar';
+import { CalendarIcon, ChevronLeft, ChevronRight, Search, Loader2 } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn, formatCurrency } from '@/lib/utils';
+import { toast } from 'sonner';
+import { fetchEmployees, Employee } from '@/services/api';
+import axios from 'axios';
 
 interface SalaryData {
   id: string;
   name: string;
-  workingDays: number;
   presentDays: number;
   halfDays: number;
+  leaveDays: number;
   dailyRate: number;
-  salary: number;
-  netSalary: number;
+  allocatedLeaves: number;
+  effectiveWorkingDays: number;
+  salary: number;          // Monthly salary
+  netSalary: number;       // Calculated net salary
   status?: 'active' | 'inactive';
+  workingDays: number;     // Total working days in month
 }
 
-const SalariesTab = () => {
+const SalariesTab: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [salaries, setSalaries] = useState<SalaryData[]>([]);
   const [filter, setFilter] = useState('');
   const [employees, setEmployees] = useState<any[]>([]);
   const [attendanceData, setAttendanceData] = useState<Record<string, any>>({});
-
-  // Calculate working days in the current month (excluding weekends)
-  const getWorkingDaysInMonth = (date: Date) => {
-    const start = startOfMonth(date);
-    const end = endOfMonth(date);
-    const days = eachDayOfInterval({ start, end });
-    return days.filter(day => !isWeekend(day)).length;
-  };
 
   // Fetch all employees
   const fetchEmployeeData = async () => {
@@ -49,53 +51,138 @@ const SalariesTab = () => {
     }
   };
 
-  // Fetch attendance for a specific date range
-  const fetchAttendanceData = async (startDate: Date, endDate: Date) => {
-    const dateRange = eachDayOfInterval({ start: startDate, end: endDate });
-    const attendance: Record<string, any> = {};
+  // Fetch attendance for a specific month
+  const fetchAttendanceForMonth = async (date: Date) => {
+    const month = date.getMonth() + 1; // JavaScript months are 0-indexed
+    const year = date.getFullYear();
     
-    for (const date of dateRange) {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      try {
-        const data = await getAttendanceByDate(dateStr);
-        attendance[dateStr] = data;
-      } catch (error) {
-        console.error(`Error fetching attendance for ${dateStr}:`, error);
+    console.log(`Fetching attendance for ${month}/${year}`);
+    
+    try {
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const url = new URL(`${baseUrl}/api/attendance`);
+      url.searchParams.append('month', month.toString());
+      url.searchParams.append('year', year.toString());
+      
+      console.log('API URL:', url.toString());
+      
+      const response = await axios.get(url.toString(), {
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
+        timeout: 10000 // 10 second timeout
+      });
+      
+      console.log('API Response:', response.status, response.data);
+      
+      if (!Array.isArray(response.data)) {
+        console.error('Unexpected response format:', response.data);
+        throw new Error('Invalid response format from server');
       }
+      
+      // Transform the data into a date-based structure with employee ID as key
+      const attendanceByDate: Record<string, any[]> = {};
+      
+      response.data.forEach((record: any) => {
+        if (!record.date) {
+          console.warn('Record missing date field:', record);
+          return;
+        }
+        if (!attendanceByDate[record.date]) {
+          attendanceByDate[record.date] = [];
+        }
+        // Ensure employee_id is properly set from the record
+        if (!record.employee_id && record.employee_id !== 0) {
+          console.warn('Record missing employee_id:', record);
+          return;
+        }
+        attendanceByDate[record.date].push({
+          ...record,
+          employee_id: record.employee_id.toString() // Ensure consistent string comparison
+        });
+      });
+      
+      console.log(`Processed ${response.data.length} records into ${Object.keys(attendanceByDate).length} dates`);
+      console.log('Sample attendance data:', JSON.stringify(attendanceByDate, null, 2).substring(0, 500) + '...');
+      
+      setAttendanceData(attendanceByDate);
+      return attendanceByDate;
+    } catch (error) {
+      console.error('Error fetching monthly attendance:', error);
+      toast.error('Failed to load attendance data');
+      return {};
     }
-    
-    setAttendanceData(attendance);
-    return attendance;
   };
 
-  // Calculate salaries based on attendance
-  const calculateSalaries = (employees: any[], attendance: Record<string, any[]>) => {
+
+
+
+  // Calculate working days in a month (excluding weekends)
+  const getWorkingDaysInMonth = (date: Date): number => {
+    const start = startOfMonth(date);
+    const end = endOfMonth(date);
+    const days = eachDayOfInterval({ start, end });
+    return days.filter(day => !isWeekend(day)).length;
+  };
+
+  // Calculate salaries based on attendance and allocated leaves
+  const calculateSalaries = (employees: Employee[], attendanceData: Record<string, any[]>): SalaryData[] => {
+    console.log('Calculating salaries with employees:', employees);
+    console.log('Attendance data:', attendanceData);
+    
     const start = startOfMonth(currentDate);
     const end = endOfMonth(currentDate);
-    const workingDays = getWorkingDaysInMonth(currentDate);
+    const totalWorkingDays = getWorkingDaysInMonth(currentDate);
+    console.log(`Total working days in month: ${totalWorkingDays} (${format(start, 'MMM yyyy')})`);
+    
+    // Flatten attendance data into a single array of records
+    const allAttendance = Object.values(attendanceData).flat();
     
     return employees.map(employee => {
+      console.log(`\nProcessing employee: ${employee.id} - ${employee.name}`);
       let presentDays = 0;
       let halfDays = 0;
+      let leaveDays = 0;
       
-      // Count present and half days
-      const dateRange = eachDayOfInterval({ start, end });
-      dateRange.forEach(date => {
-        const dateStr = format(date, 'yyyy-MM-dd');
-        const dayAttendance = attendance[dateStr] || [];
-        const employeeAttendance = dayAttendance.find((a: any) => a.employee_id === employee.id);
+      // Get all attendance records for this employee
+      const allEmployeeAttendance = allAttendance.filter(record => {
+        const recordId = record.employee_id?.toString() || '';
+        const employeeId = employee.id?.toString() || '';
+        return recordId === employeeId || 
+               recordId === `EMP${employeeId}` ||
+               `EMP${recordId}` === employeeId;
+      });
+      
+      console.log(`Found ${allEmployeeAttendance.length} attendance records for ${employee.id}`);
+      
+      // Process each attendance record for this employee
+      allEmployeeAttendance.forEach(record => {
+        const date = new Date(record.date);
+        if (isWeekend(date)) return; // Skip weekends
         
-        if (employeeAttendance) {
-          if (employeeAttendance.status === 'present') {
-            presentDays++;
-          } else if (employeeAttendance.status === 'half_day') {
-            halfDays++;
-          }
+        console.log(`Processing record for ${record.date}: ${record.status}`);
+        
+        if (record.status === 'present') {
+          presentDays++;
+        } else if (record.status === 'half_day') {
+          halfDays++;
+        } else if (record.status === 'absent' || record.status === 'leave') {
+          leaveDays++;
         }
       });
       
-      // Calculate salary
-      const dailyRate = employee.salary / workingDays;
+      // Calculate working days after deducting allocated leaves
+      const allocatedLeaves = employee.totalLeaves || 0;
+      const effectiveWorkingDays = Math.max(0, totalWorkingDays - allocatedLeaves);
+      
+      console.log(`Employee ${employee.id} - Present: ${presentDays}, Half-days: ${halfDays}, Leave: ${leaveDays}`);
+      console.log(`Allocated leaves: ${allocatedLeaves}, Effective working days: ${effectiveWorkingDays}`);
+      
+      // Calculate daily rate based on effective working days
+      const dailyRate = effectiveWorkingDays > 0 ? (employee.salary / effectiveWorkingDays) : 0;
+      
+      // Calculate net salary based on actual attendance
       const presentAmount = presentDays * dailyRate;
       const halfDayAmount = halfDays * dailyRate * 0.5;
       const netSalary = presentAmount + halfDayAmount;
@@ -103,18 +190,25 @@ const SalariesTab = () => {
       return {
         id: employee.id,
         name: employee.name,
-        workingDays,
         presentDays,
         halfDays,
+        leaveDays,
+        allocatedLeaves,
+        effectiveWorkingDays,
         dailyRate: parseFloat(dailyRate.toFixed(2)),
         salary: employee.salary,
-        netSalary: Math.round(netSalary * 100) / 100
+        netSalary: Math.round(netSalary * 100) / 100,
+        status: employee.status,
+        workingDays: totalWorkingDays
       };
     });
   };
 
   // Fetch all necessary data
-  const fetchSalaries = async (date: Date) => {
+  const fetchSalaries = useCallback(async (date: Date) => {
+    const monthKey = format(date, 'yyyy-MM');
+    console.log(`Fetching salaries for ${monthKey}`);
+    
     try {
       setLoading(true);
       
@@ -124,15 +218,11 @@ const SalariesTab = () => {
       // Only fetch active employees
       const activeEmployees = empData.filter((emp: any) => emp.status === 'active');
       
-      // Set date range for the current month
-      const startDate = startOfMonth(date);
-      const endDate = endOfMonth(date);
+      // Fetch attendance data for the entire month
+      const monthlyAttendance = await fetchAttendanceForMonth(date);
       
-      // Fetch attendance data
-      await fetchAttendanceData(startDate, endDate);
-      
-      // Calculate salaries
-      const calculatedSalaries = calculateSalaries(activeEmployees, attendanceData);
+      // Calculate salaries with the fetched attendance data
+      const calculatedSalaries = calculateSalaries(activeEmployees, monthlyAttendance);
       setSalaries(calculatedSalaries);
       
     } catch (error) {
@@ -141,12 +231,21 @@ const SalariesTab = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [employees]);
 
   // Refresh data when month changes
   useEffect(() => {
-    fetchSalaries(currentDate);
-  }, [currentDate, attendanceData]);
+    const controller = new AbortController();
+    
+    // Only fetch if we have a valid date
+    if (currentDate) {
+      fetchSalaries(currentDate);
+    }
+    
+    return () => {
+      controller.abort();
+    };
+  }, [currentDate, fetchSalaries]);
 
   const handlePreviousMonth = () => {
     setCurrentDate(subMonths(currentDate, 1));
@@ -232,10 +331,16 @@ const SalariesTab = () => {
                   Working Days
                 </th>
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Allocated Leaves
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Present
                 </th>
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Half Days
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Leave Days
                 </th>
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Daily Rate
@@ -262,10 +367,16 @@ const SalariesTab = () => {
                       {employee.workingDays}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
+                      {employee.allocatedLeaves}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
                       {employee.presentDays}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
                       {employee.halfDays}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
+                      {employee.leaveDays}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
                       ₹{employee.dailyRate.toFixed(2)}

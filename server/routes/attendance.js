@@ -49,27 +49,71 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Get attendance for a specific date
+// Get attendance for a specific month
 router.get('/', async (req, res) => {
-  const { date } = req.query;
+  console.log('Received request with query params:', req.query);
   
-  if (!date) {
-    return res.status(400).json({ error: 'Date parameter is required' });
+  const { month, year } = req.query;
+  
+  // Basic validation
+  if (!month || !year) {
+    console.log('Missing month or year parameters');
+    return res.status(400).json({ 
+      error: 'Both month and year parameters are required',
+      received: { month, year }
+    });
   }
-
+  
+  // Convert to numbers
+  const monthNum = parseInt(month, 10);
+  const yearNum = parseInt(year, 10);
+  
+  // Validate month and year
+  if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+    console.log('Invalid month:', monthNum);
+    return res.status(400).json({ 
+      error: 'Invalid month. Must be between 1 and 12',
+      received: month
+    });
+  }
+  
+  if (isNaN(yearNum) || yearNum < 2000 || yearNum > 2100) {
+    console.log('Invalid year:', yearNum);
+    return res.status(400).json({ 
+      error: 'Invalid year. Must be between 2000 and 2100',
+      received: year
+    });
+  }
+  
   try {
-    const [rows] = await db.query(
-      `SELECT a.*, e.name as employee_name, e.place
-       FROM attendance a
-       JOIN employees e ON a.employee_id = e.id
-       WHERE a.date = ?
-       ORDER BY e.name`,
-      [date]
-    );
+    console.log(`Fetching attendance for ${monthNum}/${yearNum}`);
+    
+    // Use the correct column name total_leaves from the database
+    const query = `
+      SELECT 
+        a.*, 
+        e.name as employee_name, 
+        e.place, 
+        COALESCE(e.total_leaves, 0) as totalLeaves
+      FROM attendance a
+      JOIN employees e ON a.employee_id = e.id
+      WHERE MONTH(a.date) = ? AND YEAR(a.date) = ?
+      ORDER BY a.date, e.name
+    `;
+    
+    console.log('Executing query:', query, 'with params:', [monthNum, yearNum]);
+    
+    const [rows] = await db.query(query, [monthNum, yearNum]);
+    console.log(`Found ${rows.length} attendance records`);
+    
     res.json(rows);
   } catch (error) {
     console.error('Error fetching attendance:', error);
-    res.status(500).json({ error: 'Error fetching attendance', details: error.message });
+    res.status(500).json({ 
+      error: 'Error fetching attendance',
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 

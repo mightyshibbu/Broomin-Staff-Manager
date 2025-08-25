@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Table,
   TableBody,
@@ -9,315 +9,438 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Search, Plus, Pencil, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Search, Plus, Pencil, Trash2, Check, X, ToggleLeft, ToggleRight } from "lucide-react";
+import { fetchEmployees, createEmployee, updateEmployee, deleteEmployee } from "@/services/api";
+import { useToaster } from "@/lib/toast";
+import { format } from "date-fns";
 
-// Define a mock StaffFormModal component since the actual one isn't available
-// In a real implementation, you would create this component in a separate file
-const StaffFormModal = ({ title, employee, onSubmit, onCancel }) => {
-  // This is a placeholder implementation
+// Staff Form Modal (inline for now)
+const StaffFormModal = ({ 
+  title, 
+  employee, 
+  onSubmit, 
+  onCancel,
+  isSubmitting 
+}: { 
+  title: string; 
+  employee: Partial<Employee> | null; 
+  onSubmit: (data: Partial<Employee>) => void; 
+  onCancel: () => void;
+  isSubmitting: boolean;
+}) => {
+  const [formData, setFormData] = useState<Partial<Employee>>({
+    status: 'active',
+    total_leaves: 0,
+    ...(employee || {})
+  });
+
+  // Update form data when employee prop changes
+  useEffect(() => {
+    if (employee) {
+      setFormData(prev => ({
+        ...prev,
+        ...employee
+      }));
+    } else {
+      // Reset form for new employee
+      setFormData({
+        status: 'active',
+        total_leaves: 0
+      });
+    }
+  }, [employee]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'age' || name === 'salary' || name === 'total_leaves' 
+        ? (value === '' ? '' : Number(value))
+        : value
+    }));
+  };
+
+  // Format date for date input field
+  const formatDateForInput = (dateString?: string) => {
+    if (!dateString) return '';
+    try {
+      return new Date(dateString).toISOString().split('T')[0];
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
   return (
-    <div className="p-4">
-      <h2 className="text-xl font-bold mb-4">{title}</h2>
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Name:</label>
-          <Input defaultValue={employee?.name || ""} />
+    <form onSubmit={handleSubmit} className="space-y-4 p-4">
+      <DialogHeader>
+        <DialogTitle>{title}</DialogTitle>
+      </DialogHeader>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Name *</label>
+          <Input name="name" value={formData.name || ''} onChange={handleChange} required />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Age:</label>
-          <Input type="number" defaultValue={employee?.age || ""} />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Age *</label>
+          <Input name="age" type="number" value={formData.age || ''} onChange={handleChange} min="18" max="100" required />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Area:</label>
-          <Input defaultValue={employee?.area || ""} />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Place *</label>
+          <Input name="place" value={formData.place || ''} onChange={handleChange} required />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Salary:</label>
-          <Input type="number" defaultValue={employee?.salary || ""} />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Salary *</label>
+          <Input name="salary" type="number" value={formData.salary || ''} onChange={handleChange} min="0" step="0.01" required />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Job Time From:
-          </label>
-          <Input defaultValue={employee?.jobTimeFrom || ""} />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Job Time From *</label>
+          <Input name="job_time_from" type="time" value={formData.job_time_from || ''} onChange={handleChange} required />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Job Time To:</label>
-          <Input defaultValue={employee?.jobTimeTo || ""} />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Job Time To *</label>
+          <Input name="job_time_to" type="time" value={formData.job_time_to || ''} onChange={handleChange} required />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Joining Date:
-          </label>
-          <Input defaultValue={employee?.joiningDate || ""} />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Joining Date *</label>
+          <Input 
+            name="joining_date" 
+            type="date" 
+            value={formData.joining_date ? formatDateForInput(formData.joining_date) : ''} 
+            onChange={handleChange} 
+            required 
+          />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Leaves Allocated:
-          </label>
-          <Input type="number" defaultValue={employee?.totalLeaves || ""} />
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Total Leaves *</label>
+          <Input name="total_leaves" type="number" value={formData.total_leaves || 0} onChange={handleChange} min="0" required />
         </div>
-        <div className="pt-4 flex justify-end space-x-2">
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button onClick={() => onSubmit(employee || {})}>Submit</Button>
+        <div className="space-y-2 flex items-center space-x-2 pt-2">
+          <span className="text-sm font-medium">Status</span>
+          <button
+            type="button"
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 ${formData.status === 'active' ? 'bg-green-500' : 'bg-gray-200'}`}
+            onClick={() => {
+              setFormData(prev => ({
+                ...prev,
+                status: prev.status === 'active' ? 'inactive' : 'active'
+              }));
+            }}
+          >
+            <span className="sr-only">Toggle status</span>
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition-transform ${formData.status === 'active' ? 'translate-x-6' : 'translate-x-1'}`}
+            >
+              {formData.status === 'active' ? (
+                <Check className="h-4 w-4 text-green-500 mx-auto mt-0.5" />
+              ) : (
+                <X className="h-4 w-4 text-gray-500 mx-auto mt-0.5" />
+              )}
+            </span>
+          </button>
+          <span className="text-sm text-gray-500">
+            {formData.status === 'active' ? 'Active' : 'Inactive'}
+          </span>
         </div>
       </div>
-    </div>
+      
+      <DialogFooter className="pt-4">
+        <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "Saving..." : "Save"}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 };
 
 interface Employee {
   id: string;
   name: string;
-  joiningDate: string;
   age: number;
-  area: string;
+  place: string;  // Changed from 'area' to 'place'
   salary: number;
-  jobTimeFrom: string;
-  jobTimeTo: string;
-  status: string;
-  totalLeaves: number;
+  job_time_from: string;  // Changed to match database column names
+  job_time_to: string;    // Changed to match database column names
+  joining_date: string;   // Changed to match database column names
+  total_leaves: number;   // Changed to match database column names
+  status: 'active' | 'inactive';
 }
 
 const StaffTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(
-    null,
-  );
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const { success: toastSuccess, error: toastError } = useToaster();
 
-  // Mock data for demonstration
-  const [employees, setEmployees] = useState<Employee[]>([
-    {
-      id: "10001",
-      name: "Neil Borah",
-      joiningDate: "25/04/2025",
-      age: 28,
-      area: "Viman Nagar",
-      salary: 14000,
-      jobTimeFrom: "1000",
-      jobTimeTo: "1900",
-      status: "active",
-      totalLeaves: 5,
-    },
-    {
-      id: "10002",
-      name: "Jatin Yadav",
-      joiningDate: "25/04/2025",
-      age: 28,
-      area: "Viman Nagar",
-      salary: 14000,
-      jobTimeFrom: "1000",
-      jobTimeTo: "1900",
-      status: "active",
-      totalLeaves: 5,
-    },
-    {
-      id: "10003",
-      name: "Meher Khan",
-      joiningDate: "25/04/2025",
-      age: 28,
-      area: "Viman Nagar",
-      salary: 14000,
-      jobTimeFrom: "1000",
-      jobTimeTo: "1900",
-      status: "active",
-      totalLeaves: 5,
-    },
-    {
-      id: "10004",
-      name: "Neil Borah",
-      joiningDate: "25/04/2025",
-      age: 28,
-      area: "Viman Nagar",
-      salary: 14000,
-      jobTimeFrom: "1000",
-      jobTimeTo: "1900",
-      status: "active",
-      totalLeaves: 5,
-    },
-    {
-      id: "10005",
-      name: "Neil Borah",
-      joiningDate: "25/04/2025",
-      age: 28,
-      area: "Viman Nagar",
-      salary: 14000,
-      jobTimeFrom: "1000",
-      jobTimeTo: "1900",
-      status: "active",
-      totalLeaves: 5,
-    },
-  ]);
+  // Load employees on mount
+  useEffect(() => {
+    loadEmployees();
+  }, []);
 
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(e.target.value);
-  };
-
-  const filteredEmployees = employees.filter(
-    (employee) =>
-      employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.id.includes(searchTerm),
-  );
-
-  const handleCreateEmployee = (newEmployee: Omit<Employee, "id">) => {
-    // In a real app, this would be handled by a backend service
-    const id = `${10000 + employees.length + 1}`;
-    setEmployees([...employees, { ...newEmployee, id }]);
-    setIsCreateModalOpen(false);
-  };
-
-  const handleUpdateEmployee = (updatedEmployee: Employee) => {
-    setEmployees(
-      employees.map((emp) =>
-        emp.id === updatedEmployee.id ? updatedEmployee : emp,
-      ),
-    );
-    setIsUpdateModalOpen(false);
-    setSelectedEmployee(null);
-  };
-
-  const handleDeleteEmployee = () => {
-    if (selectedEmployee) {
-      setEmployees(employees.filter((emp) => emp.id !== selectedEmployee.id));
-      setIsDeleteDialogOpen(false);
-      setSelectedEmployee(null);
+  const loadEmployees = async () => {
+    try {
+      const data = await fetchEmployees();
+      setEmployees(data);
+    } catch (error) {
+      console.error("Error loading employees:", error);
+      toastError("Failed to load employees");
     }
   };
 
+  const handleCreate = async (newEmployee: Partial<Employee>) => {
+    const requiredFields = ['name', 'age', 'place', 'salary', 'job_time_from', 'job_time_to', 'joining_date', 'total_leaves'];
+    const missingFields = requiredFields.filter(field => newEmployee[field as keyof Employee] === undefined);
+    
+    if (missingFields.length > 0) {
+      toastError(`Missing required fields: ${missingFields.join(', ')}`);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await createEmployee(newEmployee as Omit<Employee, 'id' | 'status'>);
+      toastSuccess("Employee created successfully");
+      setIsCreateModalOpen(false);
+      await loadEmployees();
+    } catch (error) {
+      console.error("Error creating employee:", error);
+      toastError("Failed to create employee");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUpdate = async (updatedEmployee: Partial<Employee>) => {
+    if (!selectedEmployee) return;
+    setIsSubmitting(true);
+    try {
+      await updateEmployee(selectedEmployee.id, updatedEmployee);
+      toastSuccess("Employee updated successfully");
+      setIsUpdateModalOpen(false);
+      await loadEmployees();
+    } catch (error) {
+      console.error("Error updating employee:", error);
+      toastError("Failed to update employee");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedEmployee) return;
+    try {
+      await deleteEmployee(selectedEmployee.id);
+      toastSuccess("Employee deleted successfully");
+      setIsDeleteDialogOpen(false);
+      await loadEmployees();
+    } catch (error) {
+      console.error("Error deleting employee:", error);
+      toastError("Failed to delete employee");
+    }
+  };
+
+  const formatTime = (timeString: string) => {
+    if (!timeString) return "";
+    const [hours, minutes] = timeString.split(":");
+    return `${parseInt(hours) % 12 || 12}:${minutes} ${parseInt(hours) >= 12 ? "PM" : "AM"}`;
+  };
+
+  const filteredEmployees = employees.filter(employee =>
+    employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    employee.area.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    employee.id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm">
-      <div className="flex justify-between items-center mb-6">
-        <div className="relative w-64">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
+    <div className="p-6 space-y-6">
+      {/* Top bar */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div className="relative w-full sm:w-96">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name or ID"
+            type="search"
+            placeholder="Search by name, area, or ID..."
+            className="pl-10 h-10"
             value={searchTerm}
-            onChange={handleSearch}
-            className="pl-8"
+            onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
         
       </div>
 
-      <div className="rounded-lg border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[100px]">Emp ID</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Joining Date</TableHead>
-              <TableHead>Age</TableHead>
-              <TableHead>Area</TableHead>
-              <TableHead>Salary</TableHead>
-              <TableHead>Job Time From</TableHead>
-              <TableHead>Job Time To</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Total Leaves</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredEmployees.length > 0 ? (
-              filteredEmployees.map((employee) => (
-                <TableRow key={employee.id}>
-                  <TableCell className="font-medium">{employee.id}</TableCell>
-                  <TableCell>{employee.name}</TableCell>
-                  <TableCell>{employee.joiningDate}</TableCell>
-                  <TableCell>{employee.age}</TableCell>
-                  <TableCell>{employee.area}</TableCell>
-                  <TableCell>{employee.salary}</TableCell>
-                  <TableCell>{employee.jobTimeFrom}</TableCell>
-                  <TableCell>{employee.jobTimeTo}</TableCell>
-                  <TableCell>
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs ${employee.status === "active" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-                    >
-                      {employee.status}
-                    </span>
-                  </TableCell>
-                  <TableCell>{employee.totalLeaves}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedEmployee(employee);
-                          setIsUpdateModalOpen(true);
-                        }}
+      {/* Employee Table */}
+      <div className="rounded-lg border shadow-sm overflow-hidden">
+        <div className="relative overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-gray-50">
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Age</TableHead>
+                <TableHead>Place</TableHead>
+                <TableHead>Salary</TableHead>
+                <TableHead>Job Time</TableHead>
+                <TableHead>Joining Date</TableHead>
+                <TableHead>Leaves</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-[120px]">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredEmployees.length > 0 ? (
+                filteredEmployees.map((employee) => (
+                  <TableRow key={employee.id} className="hover:bg-gray-50">
+                    <TableCell className="font-medium">{employee.id.substring(0, 8)}...</TableCell>
+                    <TableCell className="font-medium">{employee.name}</TableCell>
+                    <TableCell>{employee.age}</TableCell>
+                    <TableCell className="capitalize">{employee.place}</TableCell>
+                    <TableCell>${employee.salary ? `$${employee.salary.toLocaleString()}` : '-'}</TableCell>
+                    <TableCell>
+                      {formatTime(employee.job_time_from)} - {formatTime(employee.job_time_to)}
+                    </TableCell>
+                    <TableCell>
+                      {new Date(employee.joining_date).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center">
+                        <span className="font-medium">{employee.total_leaves}</span>
+                        <span className="text-muted-foreground ml-1">days</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          employee.status === "active"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedEmployee(employee);
-                          setIsDeleteDialogOpen(true);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
+                        {employee.status === "active" ? (
+                          <>
+                            <Check className="h-3 w-3 mr-1" /> Active
+                          </>
+                        ) : (
+                          <>
+                            <X className="h-3 w-3 mr-1" /> Inactive
+                          </>
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex space-x-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setSelectedEmployee(employee);
+                            setIsUpdateModalOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          <span className="sr-only">Edit</span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          onClick={() => {
+                            setSelectedEmployee(employee);
+                            setIsDeleteDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
+                    No employees found. Try adjusting your search or add a new employee.
                   </TableCell>
                 </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={11}
-                  className="text-center py-10 text-gray-500"
-                >
-                  No employees found
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
-    
+      {/* Create Employee Modal */}
+      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+        <DialogContent className="sm:max-w-[650px]">
+          <StaffFormModal
+            title="Add New Employee"
+            employee={null}
+            onSubmit={handleCreate}
+            onCancel={() => setIsCreateModalOpen(false)}
+            isSubmitting={isSubmitting}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* Update Employee Modal */}
       <Dialog open={isUpdateModalOpen} onOpenChange={setIsUpdateModalOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          {selectedEmployee && (
-            <StaffFormModal
-              title="Update staff information"
-              employee={selectedEmployee}
-              onSubmit={handleUpdateEmployee}
-              onCancel={() => setIsUpdateModalOpen(false)}
-            />
-          )}
+        <DialogContent className="sm:max-w-[650px]">
+          <StaffFormModal
+            title={`Edit ${selectedEmployee?.name || "Employee"}`}
+            employee={selectedEmployee || null}
+            onSubmit={handleUpdate}
+            onCancel={() => setIsUpdateModalOpen(false)}
+            isSubmitting={isSubmitting}
+          />
         </DialogContent>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <div className="text-center sm:text-left">
-            <h3 className="text-lg font-semibold">Delete Employee</h3>
-            <p className="mt-2 text-sm text-gray-500">
-              Are you sure you want to delete {selectedEmployee?.name}? This
-              action cannot be undone.
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Deletion</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete{" "}
+              <span className="font-medium text-foreground">{selectedEmployee?.name}</span>?  
+              This will permanently remove all associated data including attendance records.
             </p>
-            <div className="mt-5 flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setIsDeleteDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={handleDeleteEmployee}>
-                Delete
-              </Button>
-            </div>
           </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteDialogOpen(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isSubmitting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isSubmitting ? "Deleting..." : "Delete Employee"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -44,10 +44,10 @@ const Home = () => {
             
             <div className="p-6 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 180px)' }}>
               <div className="space-y-6">
-                <AttendanceTab />
-                <StaffInfoTab />
-                <DataTab />
-                <SalariesTab />
+                {activeTab === 'attendance' && <AttendanceTab key="attendance" />}
+                {activeTab === 'staff' && <StaffInfoTab key="staff" />}
+                {activeTab === 'data' && <DataTab key="data" />}
+                {activeTab === 'salaries' && <SalariesTab key="salaries" />}
               </div>
             </div>
           </Tabs>
